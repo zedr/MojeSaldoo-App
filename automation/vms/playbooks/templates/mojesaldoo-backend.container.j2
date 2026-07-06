@@ -1,0 +1,35 @@
+# Managed by Ansible (provision-vm.yml) — do not edit by hand.
+#
+# Replaces compose.yml's `backend` service. No PublishPort= — this container
+# is reachable only on the internal mojesaldoo network, via the proxy's
+# reverse_proxy directive in the Caddyfile.
+
+[Unit]
+Description=MojeSaldoo backend (Django/gunicorn)
+After=mojesaldoo-db.service
+Requires=mojesaldoo-db.service
+
+[Container]
+Image={{ mojesaldoo_backend_image }}
+ContainerName=mojesaldoo-backend
+Network=mojesaldoo.network
+NetworkAlias=backend
+EnvironmentFile={{ mojesaldoo_secrets_dir }}/backend.env
+Volume={{ mojesaldoo_data_dir }}/media:/app/media:Z,U
+Volume={{ mojesaldoo_data_dir }}/logs:/app/logs:Z,U
+HealthCmd=["CMD", "python3.12", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=2).status==200 else 1)"]
+HealthInterval=30s
+HealthTimeout=3s
+HealthStartPeriod=20s
+HealthRetries=3
+Notify=healthy
+
+[Service]
+Restart=on-failure
+# Default TimeoutStartSec is too short for Notify=healthy: with
+# HealthStartPeriod=20s, HealthInterval=30s, HealthRetries=3, the health
+# check can take up to ~110s before systemd would ever see READY=1.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target

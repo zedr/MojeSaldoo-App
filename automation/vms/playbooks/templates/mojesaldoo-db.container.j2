@@ -1,0 +1,36 @@
+# Managed by Ansible (provision-vm.yml) — do not edit by hand.
+#
+# Replaces compose.yml's `db` service. NetworkAlias=db keeps the DNS name the
+# backend's PG_DATABASE_URL expects. Notify=healthy means this unit only
+# reaches "active" once HealthCmd reports the database ready, so
+# After=/Requires= in mojesaldoo-backend.container.j2 gets a real readiness
+# gate instead of just a start-order hint.
+
+[Unit]
+Description=MojeSaldoo PostgreSQL database
+After=mojesaldoo.network
+
+[Container]
+Image={{ mojesaldoo_db_image }}
+ContainerName=mojesaldoo-db
+Network=mojesaldoo.network
+NetworkAlias=db
+Volume=mojesaldoo-pgdata.volume:/var/lib/postgresql/data:Z
+EnvironmentFile={{ mojesaldoo_secrets_dir }}/db.env
+HealthCmd=pg_isready -U {{ mojesaldoo_postgres_user }} -d {{ mojesaldoo_postgres_db }}
+HealthInterval=10s
+HealthTimeout=5s
+HealthStartPeriod=10s
+HealthRetries=5
+Notify=healthy
+
+[Service]
+Restart=on-failure
+# Default TimeoutStartSec (often 45-90s system-wide) is too short for
+# Notify=healthy to land: with HealthStartPeriod=10s, HealthInterval=10s,
+# HealthRetries=5, the health check can take up to ~60s before systemd would
+# ever see READY=1.
+TimeoutStartSec=120
+
+[Install]
+WantedBy=default.target

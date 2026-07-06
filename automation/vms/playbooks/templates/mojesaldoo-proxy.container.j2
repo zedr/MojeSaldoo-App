@@ -1,0 +1,37 @@
+# Managed by Ansible (provision-vm.yml) — do not edit by hand.
+#
+# Replaces compose.yml's `frontend` service. Publishes 80/443 (redirects to
+# TLS) and serves the static production build baked into the image, proxying
+# /api/* to the backend (see automation/containers/frontend/Caddyfile).
+# Publishing ports <1024 as a rootless user requires
+# net.ipv4.ip_unprivileged_port_start to be lowered — provision-vm.yml sets
+# this via sysctl before this unit is started.
+
+[Unit]
+Description=MojeSaldoo reverse proxy (Caddy, TLS)
+After=mojesaldoo-backend.service
+Requires=mojesaldoo-backend.service
+
+[Container]
+Image={{ mojesaldoo_proxy_image }}
+ContainerName=mojesaldoo-proxy
+Network=mojesaldoo.network
+NetworkAlias=proxy
+PublishPort=80:80
+PublishPort=443:443
+Volume={{ mojesaldoo_certs_dir }}:/certs:ro,Z
+HealthCmd=curl -sk -o /dev/null https://127.0.0.1/
+HealthInterval=30s
+HealthTimeout=3s
+HealthStartPeriod=20s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+# No Notify=healthy here (default Sdnotify=conmon), so systemd sees READY as
+# soon as the container starts rather than waiting on the health check — the
+# default TimeoutStartSec is normally enough. Widened anyway for headroom.
+TimeoutStartSec=90
+
+[Install]
+WantedBy=default.target

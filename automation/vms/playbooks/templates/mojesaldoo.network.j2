@@ -1,0 +1,11 @@
+# Managed by Ansible (provision-vm.yml) — do not edit by hand.
+#
+# Shared network so the db/backend/proxy containers can resolve each other
+# by name via aardvark-dns (see the NetworkAlias= entries in the .container
+# units).
+
+[Unit]
+Description=MojeSaldoo internal container network
+
+[Network]
+NetworkName=mojesaldoo

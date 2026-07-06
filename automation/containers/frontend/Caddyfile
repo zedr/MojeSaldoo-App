@@ -1,0 +1,25 @@
+# Serves the static React build and reverse-proxies API calls to the backend
+# container. TLS uses an explicit self-signed cert/key (bind-mounted at
+# /certs by the Quadlet unit) instead of Caddy's automatic ACME/Let's Encrypt
+# behavior, since these certs are for internal/direct-IP access.
+{
+	auto_https off
+}
+
+:80 {
+	redir https://{host}{uri} permanent
+}
+
+:443 {
+	tls /certs/cert.pem /certs/key.pem
+
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

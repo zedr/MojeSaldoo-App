@@ -4,81 +4,39 @@
 
 ### Summary
 
-Spins up a local Fedora Cloud VM on libvirt (`qemu:///system`). Downloads the
-official Fedora Cloud Base Generic qcow2 image (checksum-verified), creates a
-qcow2 overlay disk from it, and boots it with `virt-install --import`. No
+Spins up a local CentOS Stream 10 VM on libvirt (`qemu:///system`). Downloads
+the official GenericCloud qcow2 image (checksum-verified), creates a qcow2
+overlay disk from it, and boots it with `virt-install --import`. No
 cloud-init or other provisioning is done — the VM is left as a blank cloud
 image for you to provision later (e.g. via the serial console or your own
 tooling).
 
-The playbook has no `become`/sudo tasks — it only runs as the invoking user.
-This means `qemu-kvm`, `libvirt`, `virt-install`, a running `libvirtd`, and
-correct ownership on the VM disk must already be in place before you run it
-(see [Prerequisites](#prerequisites) below). The invoking user must also
-already be authorized against `qemu:///system` (e.g. a member of the
-`libvirt` group), same as for interactive `virsh` use.
-
-The libvirt storage pool directory (`libvirt_pool_dir`, default `~/libvirt`)
-is created and written to as the invoking user —
-`automation/vms/scripts/create-vm.sh` passes `~/libvirt` explicitly.
+Requires `qemu-kvm`, `libvirt`, and `virt-install` — installed automatically
+via `become` if missing. The invoking user must already be authorized against
+`qemu:///system` (e.g. a member of the `libvirt` group), same as for
+interactive `virsh` use.
 
 ### Run
 
 ```bash
-ansible-playbook automation/vms/playbooks/create-vm.yml \
-  -e vm_name=my-fedora-vm
+ansible-playbook automation/vms/playbooks/create_centos_stream10_vm.yml \
+  -e vm_name=my-centos-vm
 ```
 
 Variables (override with `-e`):
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `vm_name` | `fedora-cloud-44` | libvirt domain name |
+| `vm_name` | `centos-stream10` | libvirt domain name |
 | `vm_vcpus` | `2` | |
 | `vm_memory_mb` | `4096` | |
 | `vm_disk_gb` | `20` | size of the qcow2 overlay disk |
 | `vm_network` | `default` | libvirt network to attach to |
-| `libvirt_pool_dir` | `~/libvirt` | storage pool directory (per-VM disks); owned by the invoking user |
-| `cached_images_dir` | `~/libvirt/.cached-images` | where the downloaded base cloud image is cached; skipped on subsequent runs if already present |
-| `fedora_release` | `44` | Fedora release number; there's no "latest" pointer, so bump this by hand for a new release (see [fedoraproject.org/cloud/download](https://fedoraproject.org/cloud/download)) |
-| `fedora_release_respin` | `1.7` | respin of that release's Cloud image |
-
-### Prerequisites
-
-None of this playbook's tasks use `become` — the following steps require
-root and must be done manually, once, before running it:
-
-```bash
-# 1. Install required host packages
-sudo dnf install -y qemu-kvm libvirt libvirt-daemon-kvm virt-install
-
-# 2. Ensure libvirtd is running and enabled
-sudo systemctl enable --now libvirtd
-```
-
-The third step — setting ownership on the VM disk so `qemu:///system` can
-access it — can only be done after the qcow2 disk exists, so it comes after
-your first run of the playbook creates the disk but before `virt-install`
-boots it:
-
-```bash
-# 3. Run the playbook once to create the disk (it will fail/skip the VM
-#    boot step since the disk isn't owned by qemu yet), then:
-sudo chown qemu:qemu ~/libvirt/<vm_name>.qcow2
-sudo chmod 0660 ~/libvirt/<vm_name>.qcow2
-
-# Re-run the playbook to define and start the VM.
-```
-
-Replace `<vm_name>` with the domain name (default `fedora-cloud-44`) and
-adjust the path if you override `libvirt_pool_dir`. Subsequent VMs created
-in the same pool only need step 3 repeated per new disk — steps 1–2 are
-one-time host setup.
 
 ### Connect
 
 ```bash
-virsh --connect qemu:///system console my-fedora-vm
+virsh --connect qemu:///system console my-centos-vm
 ```
 
 The cloud image ships with no configured user/password and no SSH keys, so
@@ -87,8 +45,8 @@ console access via `virsh console` is the only way in until you provision it.
 ### Teardown
 
 ```bash
-virsh --connect qemu:///system destroy my-fedora-vm
-virsh --connect qemu:///system undefine my-fedora-vm --remove-all-storage
+virsh --connect qemu:///system destroy my-centos-vm
+virsh --connect qemu:///system undefine my-centos-vm --remove-all-storage
 ```
 ## `provision-vm.yml`
 
@@ -99,46 +57,112 @@ MojeSaldoo application.
 
 The application runs in rootless Podman containers inside the VM. These pods
 have stateful volumes for the data, e.g. postgresql data. Pod orchestration
-and management is done via systemd, **not** Podman Compose. 
+and management is done via systemd, **not** Podman Compose. This same
+playbook is used for local libvirt dev VMs and for production/cloud VMs —
+nothing in it is libvirt-specific (see `provision-vm.sh -H <host>`).
 
 Upon first provisioning, a user `zedr` is created with a very strong randomly 
 generated password which is printed via a `debug` task. User `zedr` is a 
 member of wheel. The public SSH key specified in the playbook is added to the 
 authorized users file. After this, SSH access for root is disabled.
 
-Requires the `ansible.posix` collection (for `authorized_key`):
+Requires the `ansible.posix` and `community.crypto` collections
+(`authorized_key`, `sysctl`, and the self-signed cert modules):
 
 ```bash
-ansible-galaxy collection install ansible.posix
+ansible-galaxy collection install -r automation/vms/requirements.yml
 ```
+
+### Container topology
+
+Containers are managed as rootless [Podman Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html)
+units — `.container`/`.network`/`.volume` files under
+`~zedr/.config/containers/systemd/`, rendered from the Jinja2 templates in
+`playbooks/templates/`. Podman's systemd generator turns these into
+`systemd --user` services for `zedr` (kept running across reboots/logout by
+the lingering enabled earlier in the playbook):
+
+| Service | Image | Published ports | Notes |
+| --- | --- | --- | --- |
+| `mojesaldoo-db.service` | `postgres:16` | none | `Notify=healthy` gates startup ordering on an actual `pg_isready` pass, not just process start |
+| `mojesaldoo-backend.service` | `mojesaldoo-backend:latest` | none | Django/gunicorn; reachable only on the internal `mojesaldoo` network |
+| `mojesaldoo-proxy.service` | `mojesaldoo-proxy:latest` | `80`, `443` | Caddy; serves the production frontend build baked into the image and reverse-proxies `/api/*` to the backend; terminates TLS with a **self-signed certificate** (no ACME/Let's Encrypt) generated once by the playbook |
+
+Publishing ports 80/443 as a rootless user requires lowering
+`net.ipv4.ip_unprivileged_port_start`, which the playbook does via `sysctl`.
+
+Secrets (the Postgres password and `DJANGO_SECRET_KEY`) are generated once on
+first run and written to `0600` env files under `~zedr/.config/mojesaldoo/`;
+re-running the playbook reads them back instead of rotating them.
+
+### Image delivery (no registry)
+
+There is no container registry involved. The playbook builds the `backend`
+and `proxy` images **on the control host** (`delegate_to: localhost`),
+`podman save`s them into a single tarball, copies that tarball to the VM, and
+`podman load`s it into `zedr`'s rootless image store. This runs on every
+provisioning pass, so re-running the playbook after a code change rebuilds
+and redeploys the images (the Quadlet services are restarted, not just
+started, for the same reason).
+
+`postgres:16` has no Containerfile — it's a public base image, not something
+built by this project — so it isn't built, only bundled: if `podman image
+exists docker.io/library/postgres:16` on the control host, it's saved and
+loaded alongside `backend`/`proxy` in the same tarball; otherwise it's left
+out, and the db Quadlet unit pulls it straight from Docker Hub itself the
+first time it starts. Bundling it when available avoids a slow first pull
+over the VM's own network causing `mojesaldoo-db.service` to time out on
+start (systemd's default `TimeoutStartSec` isn't long enough to pull a
+~450 MB image, initialize Postgres, and pass the health check).
 
 ### Bootstrapping
 
 The cloud image created by `create-vm.yml` has no user, password, or SSH key
-configured, so this playbook must connect as `root` over SSH the first time.
-Before running it, use `virsh console` to log in and either add a temporary
-root SSH key or set a temporary root password:
+configured, so Ansible can't reach it over SSH out of the box. Seeding root's
+SSH access is a control-host operation (it edits the VM's qcow2 disk), so
+`automation/vms/scripts/provision-vm.sh` does it — always use the script
+rather than calling `ansible-playbook` directly:
 
 ```bash
-virsh --connect qemu:///system console my-fedora-vm
+automation/vms/scripts/provision-vm.sh my-centos-vm -u root
 ```
 
-Once root access is available over SSH, point an inventory at the VM (or pass
-`ansible_host`/`ansible_user` with `-e`) and run:
+If your SSH private key is passphrase-protected, load it into `ssh-agent`
+first — the script and Ansible authenticate non-interactively (`BatchMode`),
+so an unloaded encrypted key makes every connection fail silently at
+`Permission denied (publickey)`:
 
 ```bash
-ansible-playbook automation/vms/playbooks/provision-vm.yml \
-  -i <inventory-with-vm> \
-  -e ansible_user=root
+ssh-add ~/.ssh/id_ed25519
 ```
 
-Since the last task disables root SSH login, this first run is a one-shot
-bootstrap. Subsequent re-runs should connect as `zedr` (who has `sudo`/`become`
-via `wheel`) instead of `root`.
+(The script preflight-checks for this and errors out with guidance if the key
+isn't usable non-interactively.)
 
-Variables (override with `-e`):
+Idempotently, before running the playbook, the script:
+
+1. Probes SSH key auth to the VM. If it already works, it skips straight to
+   provisioning (this is what makes re-runs a no-op).
+2. Otherwise it locates the VM's disk (`virsh domblklist`), installs
+   `guestfs-tools` if needed, shuts the VM down, injects the SSH public key
+   into `/root/.ssh/authorized_keys` on the disk via
+   `virt-customize --ssh-inject`, and boots it back up.
+
+The seeding step runs `dnf install guestfs-tools` and `virt-customize` against
+the root-owned qcow2, so it uses `sudo` and may prompt for your **local** sudo
+password. It only does this when seeding is actually needed, and only for
+libvirt VMs resolved via `virsh` — with `-H <host>` (a host not managed by the
+local libvirt) seeding is skipped, and that host must already have SSH access
+configured by other means.
+
+Since the last task disables root SSH login, the first run must connect as
+`root` (the script's default). Subsequent re-runs should connect as `zedr`
+(`-u zedr`, who has `sudo`/`become` via `wheel`) instead; either way, the
+SSH-auth probe means the script never re-seeds an already-provisioned VM.
+
+Variables (override with `-e`, or via the script's `-k`):
 
 | Variable | Default | Notes |
 | --- | --- | --- |
 | `app_user` | `zedr` | user created on the VM |
-| `zedr_ssh_pubkey_file` | `~/.ssh/id_ed25519.pub` | public key (on the control host) installed into `zedr`'s `authorized_keys` |
+| `zedr_ssh_pubkey_file` | `~/.ssh/id_ed25519.pub` | public key (on the control host) installed into `zedr`'s `authorized_keys`; the script also injects this key for root when seeding |

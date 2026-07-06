@@ -3,21 +3,19 @@
 # with the software and configuration needed to run the MojeSaldoo application
 # in rootless Podman containers (see compose.yml).
 #
-# Bootstrap: the cloud image ships with no user, password, or SSH key, so this
-# playbook must connect as root over SSH the first time. Inject a temporary
-# root SSH key or password via `virsh console` before running this, then point
-# an inventory (or -e ansible_host=... -e ansible_user=root) at the VM.
+# Bootstrap: the cloud image ships with no user, password, or SSH key, so
+# Ansible cannot reach it over SSH out of the box. Seeding root's SSH access
+# (editing the VM's qcow2 disk with virt-customize) is a control-host
+# operation and is handled by automation/vms/scripts/provision-vm.sh *before*
+# this playbook runs — use that script rather than calling ansible-playbook
+# directly. The script seeds idempotently (only when key auth isn't already
+# working) and then invokes this playbook.
 #
 # On first run this creates user `zedr` (member of wheel) with a strong random
 # password printed via a `debug` task, installs the SSH public key named by
 # zedr_ssh_pubkey_file into zedr's authorized_keys, and disables root SSH
 # login as the LAST task. Re-runs are idempotent and connect as `zedr` with
 # `become` instead of as root.
-#
-# Usage (first run, bootstrapping as root):
-#   ansible-playbook automation/vms/playbooks/provision-vm.yml \
-#     -i <inventory-with-vm> \
-#     -e ansible_user=root
 #
 # Requires the ansible.posix collection (for authorized_key):
 #   ansible-galaxy collection install ansible.posix
@@ -33,13 +31,36 @@
 
     provision_packages:
       - podman
-      - podman-plugins
+      #- podman-plugins
       - containers-common
       - container-selinux
       - slirp4netns
       - fuse-overlayfs
+      - netavark
+      - aardvark-dns
+      - passt
       - git
       - python3
+      # Needed by the community.crypto modules (self-signed cert generation
+      # below), which run on the VM's own Python, not the control host's.
+      - python3-cryptography
+
+    # Repo root on the control host, used to build/save the app images
+    # locally (this playbook lives at automation/vms/playbooks/).
+    mojesaldoo_repo_root: "{{ playbook_dir }}/../../.."
+
+    mojesaldoo_data_dir: "/home/{{ app_user }}/mojesaldoo/data"
+    mojesaldoo_secrets_dir: "/home/{{ app_user }}/.config/mojesaldoo"
+    mojesaldoo_certs_dir: "{{ mojesaldoo_secrets_dir }}/certs"
+    mojesaldoo_quadlet_dir: "/home/{{ app_user }}/.config/containers/systemd"
+    mojesaldoo_image_tarball_local: "/tmp/mojesaldoo-images.tar"
+    mojesaldoo_image_tarball_remote: "/tmp/mojesaldoo-images.tar"
+
+    mojesaldoo_postgres_db: "mojesaldoo"
+    mojesaldoo_postgres_user: "mojesaldoo"
+    mojesaldoo_db_image: "docker.io/library/postgres:16"
+    mojesaldoo_backend_image: "localhost/mojesaldoo-backend:latest"
+    mojesaldoo_proxy_image: "localhost/mojesaldoo-proxy:latest"
 
   tasks:
     - name: Install required packages
@@ -98,6 +119,242 @@
       when: zedr_getent.rc != 0
       ansible.builtin.debug:
         msg: "Generated password for {{ app_user }}: {{ zedr_password }}"
+
+    - name: Determine the app user's UID (for rootless Podman/systemd --user calls)
+      ansible.builtin.command: "id -u {{ app_user }}"
+      register: mojesaldoo_uid_result
+      changed_when: false
+
+    - name: Set facts derived from the app user's UID
+      ansible.builtin.set_fact:
+        mojesaldoo_user_env:
+          XDG_RUNTIME_DIR: "/run/user/{{ mojesaldoo_uid_result.stdout }}"
+          DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ mojesaldoo_uid_result.stdout }}/bus"
+
+    - name: Allow rootless Podman to publish ports below 1024 (proxy needs 80/443)
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_unprivileged_port_start
+        value: "80"
+        sysctl_file: /etc/sysctl.d/99-mojesaldoo-rootless-ports.conf
+        state: present
+        reload: true
+
+    - name: Create the application's data, secrets, and Quadlet directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: "{{ mojesaldoo_data_dir }}/media", mode: "0755" }
+        - { path: "{{ mojesaldoo_data_dir }}/logs", mode: "0755" }
+        - { path: "{{ mojesaldoo_secrets_dir }}", mode: "0700" }
+        - { path: "{{ mojesaldoo_certs_dir }}", mode: "0755" }
+        - { path: "{{ mojesaldoo_quadlet_dir }}", mode: "0755" }
+
+    # Secrets: db.env and backend.env are generated once and then re-read on
+    # every subsequent run (via slurp) so that re-provisioning never rotates
+    # a live deployment's Postgres password or Django secret key out from
+    # under it.
+    - name: Check for an existing Postgres env file
+      ansible.builtin.stat:
+        path: "{{ mojesaldoo_secrets_dir }}/db.env"
+      register: mojesaldoo_db_env_stat
+
+    - name: Read back the existing Postgres password
+      when: mojesaldoo_db_env_stat.stat.exists
+      block:
+        - name: Slurp the existing Postgres env file
+          ansible.builtin.slurp:
+            path: "{{ mojesaldoo_secrets_dir }}/db.env"
+          register: mojesaldoo_db_env_slurp
+
+        - name: Extract the existing Postgres password
+          ansible.builtin.set_fact:
+            mojesaldoo_postgres_password: "{{ (mojesaldoo_db_env_slurp.content | b64decode) | regex_search('POSTGRES_PASSWORD=(.*)', '\\1') | first }}"
+
+    - name: Generate a new Postgres password (first run only)
+      when: not mojesaldoo_db_env_stat.stat.exists
+      ansible.builtin.set_fact:
+        mojesaldoo_postgres_password: "{{ lookup('ansible.builtin.password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+
+    - name: Write the Postgres env file
+      ansible.builtin.copy:
+        dest: "{{ mojesaldoo_secrets_dir }}/db.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+        content: |
+          POSTGRES_DB={{ mojesaldoo_postgres_db }}
+          POSTGRES_USER={{ mojesaldoo_postgres_user }}
+          POSTGRES_PASSWORD={{ mojesaldoo_postgres_password }}
+
+    - name: Check for an existing backend env file
+      ansible.builtin.stat:
+        path: "{{ mojesaldoo_secrets_dir }}/backend.env"
+      register: mojesaldoo_backend_env_stat
+
+    - name: Read back the existing Django secret key
+      when: mojesaldoo_backend_env_stat.stat.exists
+      block:
+        - name: Slurp the existing backend env file
+          ansible.builtin.slurp:
+            path: "{{ mojesaldoo_secrets_dir }}/backend.env"
+          register: mojesaldoo_backend_env_slurp
+
+        - name: Extract the existing Django secret key
+          ansible.builtin.set_fact:
+            mojesaldoo_django_secret_key: "{{ (mojesaldoo_backend_env_slurp.content | b64decode) | regex_search('DJANGO_SECRET_KEY=(.*)', '\\1') | first }}"
+
+    - name: Generate a new Django secret key (first run only)
+      when: not mojesaldoo_backend_env_stat.stat.exists
+      ansible.builtin.set_fact:
+        mojesaldoo_django_secret_key: "{{ lookup('ansible.builtin.password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+
+    - name: Write the backend env file
+      ansible.builtin.copy:
+        dest: "{{ mojesaldoo_secrets_dir }}/backend.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0600"
+        content: |
+          DJANGO_SECRET_KEY={{ mojesaldoo_django_secret_key }}
+          DJANGO_SETTINGS_MODULE=config.settings_production
+          DJANGO_ALLOWED_HOSTS=*
+          DJANGO_DEBUG=False
+          PG_DATABASE_URL=postgres://{{ mojesaldoo_postgres_user }}:{{ mojesaldoo_postgres_password }}@db:5432/{{ mojesaldoo_postgres_db }}
+
+    # Self-signed cert only — no ACME/Let's Encrypt. The key is left
+    # world-readable because rootless Podman bind-mounts don't remap
+    # ownership by default, and the proxy container's own UID doesn't match
+    # the host app_user; this is an accepted trade-off for an
+    # internal/direct-IP self-signed cert.
+    - name: Generate the self-signed TLS certificate's private key
+      community.crypto.openssl_privatekey:
+        path: "{{ mojesaldoo_certs_dir }}/key.pem"
+        type: RSA
+        size: 4096
+        mode: "0644"
+        owner: "{{ app_user }}"
+
+    - name: Generate the self-signed TLS certificate's signing request
+      community.crypto.openssl_csr:
+        path: "{{ mojesaldoo_certs_dir }}/cert.csr"
+        privatekey_path: "{{ mojesaldoo_certs_dir }}/key.pem"
+        common_name: "{{ ansible_host | default(inventory_hostname) }}"
+        owner: "{{ app_user }}"
+
+    - name: Generate the self-signed TLS certificate
+      community.crypto.x509_certificate:
+        path: "{{ mojesaldoo_certs_dir }}/cert.pem"
+        privatekey_path: "{{ mojesaldoo_certs_dir }}/key.pem"
+        csr_path: "{{ mojesaldoo_certs_dir }}/cert.csr"
+        provider: selfsigned
+        selfsigned_not_after: "+3650d"
+        mode: "0644"
+        owner: "{{ app_user }}"
+
+    - name: Render the Quadlet unit files
+      ansible.builtin.template:
+        src: "{{ item }}.j2"
+        dest: "{{ mojesaldoo_quadlet_dir }}/{{ item }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+      loop:
+        - mojesaldoo.network
+        - mojesaldoo-pgdata.volume
+        - mojesaldoo-db.container
+        - mojesaldoo-backend.container
+        - mojesaldoo-proxy.container
+
+    # Images are built and saved on the control host (delegate_to: localhost,
+    # become: false — this runs as the invoking operator, not on the VM),
+    # then transferred and loaded into the app user's rootless store. There
+    # is no registry involved. postgres:16 is bundled into the same transfer
+    # when it's already present locally (see below), so the VM only ever
+    # pulls it from Docker Hub itself as a last resort.
+    - name: Build the backend and proxy images on the control host
+      ansible.builtin.command: >
+        podman build -t {{ item.tag }} -f {{ item.containerfile }} {{ mojesaldoo_repo_root }}
+      loop:
+        - { tag: "mojesaldoo-backend:latest", containerfile: "automation/containers/backend/Containerfile" }
+        - { tag: "mojesaldoo-proxy:latest", containerfile: "automation/containers/frontend/Containerfile.prod" }
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    # postgres:16 has no Containerfile to build — it's a public image, so it's
+    # only included in the transfer bundle when it's already sitting in the
+    # control host's local store (e.g. from a previous run or manual pull).
+    # Otherwise the VM falls back to pulling it from Docker Hub itself when
+    # the db Quadlet unit first starts it.
+    - name: Check whether the Postgres image is already in the control host's local store
+      ansible.builtin.command: "podman image exists {{ mojesaldoo_db_image }}"
+      delegate_to: localhost
+      become: false
+      register: mojesaldoo_db_image_local
+      changed_when: false
+      failed_when: false
+
+    # docker-archive (podman save's default format) refuses to write into an
+    # existing archive in --multi-image-archive mode, so any stale tarball
+    # from a previous run must be cleared first.
+    - name: Remove any stale image tarball on the control host
+      ansible.builtin.file:
+        path: "{{ mojesaldoo_image_tarball_local }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+
+    - name: Save the images to a single tarball on the control host
+      vars:
+        mojesaldoo_images_to_save: >-
+          mojesaldoo-backend:latest mojesaldoo-proxy:latest
+          {{ mojesaldoo_db_image if mojesaldoo_db_image_local.rc == 0 else '' }}
+      ansible.builtin.command: >
+        podman save --multi-image-archive -o {{ mojesaldoo_image_tarball_local }}
+        {{ mojesaldoo_images_to_save }}
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Copy the image tarball to the VM
+      ansible.builtin.copy:
+        src: "{{ mojesaldoo_image_tarball_local }}"
+        dest: "{{ mojesaldoo_image_tarball_remote }}"
+        mode: "0644"
+
+    - name: Load the images into the app user's rootless Podman store
+      ansible.builtin.command: "podman load -i {{ mojesaldoo_image_tarball_remote }}"
+      become: true
+      become_user: "{{ app_user }}"
+      environment: "{{ mojesaldoo_user_env }}"
+      changed_when: true
+
+    - name: Remove the transferred tarball
+      ansible.builtin.file:
+        path: "{{ mojesaldoo_image_tarball_remote }}"
+        state: absent
+
+    # state: restarted (rather than started) so that re-running this
+    # playbook after loading updated images always picks them up, matching
+    # the "always-refresh" image transfer behavior above.
+    - name: Enable and (re)start the Quadlet-managed services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        scope: user
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      become: true
+      become_user: "{{ app_user }}"
+      environment: "{{ mojesaldoo_user_env }}"
+      loop:
+        - mojesaldoo-db.service
+        - mojesaldoo-backend.service
+        - mojesaldoo-proxy.service
 
     - name: Disable root SSH login
       ansible.builtin.copy:

@@ -7,6 +7,7 @@
 !backend/manage.py
 !backend/apps/
 !automation/containers/backend/entrypoint.sh
+!automation/containers/frontend/Caddyfile
 
 !frontend/package.json
 !frontend/package-lock.json

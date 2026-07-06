@@ -1,0 +1,75 @@
+# Production image: builds the static React bundle and serves it with Caddy,
+# which also reverse-proxies /api to the backend and terminates TLS. This is
+# separate from ./Containerfile (the Vite dev server used by compose.yml for
+# local development) — the two are not interchangeable.
+#
+# TLS cert/key are NOT baked into this image: the Quadlet unit that runs this
+# container bind-mounts them at runtime (see automation/vms/playbooks), so the
+# same image works across VMs with different certs.
+
+# ---- Build stage: compiles the frontend into static assets ----
+FROM quay.io/centos/centos:stream10 AS build
+
+# CentOS Stream 10 AppStream provides Node.js 22 directly (matches the toolchain
+# used in development) — no extra repos or module streams needed.
+RUN dnf install -y nodejs \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+WORKDIR /app
+
+# Dependencies are declared in package.json/package-lock.json. Installing them
+# before copying the rest of the source keeps this layer cached across source
+# changes that don't touch the lockfile.
+COPY frontend/package.json      /app/package.json
+COPY frontend/package-lock.json /app/package-lock.json
+RUN npm ci
+
+COPY frontend/ /app/
+RUN npm run build
+
+# ---- Fetch stage: Caddy has no UBI/RHEL package, so pull the official static
+# binary (a self-contained Go binary, no libc dependency concerns) instead of
+# switching base distros for the runtime image. ----
+FROM registry.access.redhat.com/ubi10-minimal AS caddy-fetch
+
+ARG CADDY_VERSION=2.8.4
+
+RUN microdnf install -y tar gzip ca-certificates \
+    && curl -fsSL -o /tmp/caddy.tar.gz \
+        "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_amd64.tar.gz" \
+    && tar -xzf /tmp/caddy.tar.gz -C /usr/bin caddy \
+    && chmod +x /usr/bin/caddy
+
+# ---- Runtime stage: Caddy serves the static build and proxies /api ----
+FROM registry.access.redhat.com/ubi10-minimal
+
+LABEL org.opencontainers.image.title="MojeSaldoo Frontend (production)" \
+      org.opencontainers.image.description="Static React build served by Caddy on UBI 10, TLS via a self-signed certificate"
+
+# libcap lets us grant the caddy binary permission to bind ports 80/443
+# without running the process as root.
+RUN microdnf install -y curl libcap shadow-utils \
+    && microdnf clean all \
+    && useradd --uid 1001 --no-create-home --shell /sbin/nologin appuser
+
+COPY --from=caddy-fetch /usr/bin/caddy /usr/bin/caddy
+RUN setcap cap_net_bind_service=+ep /usr/bin/caddy
+
+COPY automation/containers/frontend/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build /app/dist /srv
+
+RUN mkdir -p /config/caddy /data/caddy \
+    && chown -R appuser:appuser /config/caddy /data/caddy /srv
+
+USER appuser
+
+EXPOSE 80 443
+
+# The cert/key are bind-mounted at runtime to /certs (see the Quadlet unit),
+# so the healthcheck must skip verification of the self-signed chain.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+    CMD curl -sk -o /dev/null https://127.0.0.1/ || exit 1
+
+ENTRYPOINT ["/usr/bin/caddy"]
+CMD ["run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
