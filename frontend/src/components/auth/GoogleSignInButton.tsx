@@ -58,7 +58,6 @@ export function GoogleSignInButton({ defaultRedirect = '/' }: GoogleSignInButton
           shape="rectangular"
           size="large"
           width="360"
-          locale="pl"
         />
       </div>
     </div>

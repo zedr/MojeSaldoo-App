@@ -7,8 +7,10 @@ export const MODULE_DISPLAY_ORDER: ModuleName[] = [
   'customers',
   'orders',
   'delivery',
+  'van_routes',
   'invoicing',
   'ksef',
+  'ksef_inbox',
   'purchasing',
   'production',
   'cost_allocation',
@@ -49,6 +51,12 @@ export const MODULE_CARD_COPY: Record<
     statusOn: 'Moduł aktywny',
     statusOff: 'Moduł wyłączony',
   },
+  van_routes: {
+    title: 'Trasy rozwozowe',
+    description: 'Planowanie tras i rozliczanie dostaw kierowców.',
+    statusOn: 'Moduł aktywny',
+    statusOff: 'Moduł wyłączony',
+  },
   invoicing: {
     title: 'Fakturowanie',
     description: 'Faktury sprzedaży i powiązane dokumenty.',
@@ -58,6 +66,12 @@ export const MODULE_CARD_COPY: Record<
   ksef: {
     title: 'KSeF',
     description: 'Integracja z Krajowym Systemem e-Faktur.',
+    statusOn: 'Moduł aktywny',
+    statusOff: 'Moduł wyłączony',
+  },
+  ksef_inbox: {
+    title: 'Skrzynka odbiorcza KSeF',
+    description: 'Odbieranie faktur zakupowych i kosztowych z KSeF.',
     statusOn: 'Moduł aktywny',
     statusOff: 'Moduł wyłączony',
   },

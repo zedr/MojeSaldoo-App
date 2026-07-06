@@ -67,6 +67,7 @@ function makeInvoice(over: Partial<Invoice> = {}): Invoice {
     corrects_invoice_id: null,
     corrects_invoice_number: null,
     correction_reason: '',
+    corrections: [],
     items: [
       {
         id: 'item-1',

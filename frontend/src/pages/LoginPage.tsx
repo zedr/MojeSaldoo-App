@@ -8,7 +8,7 @@ import { useMyCompaniesQuery } from '@/query/use-companies';
 import { API_BASE_URL } from '@/services/api';
 import { companyService } from '@/services/company.service';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Card, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 function resolvePostLoginTarget(from: string, hasCompanies: boolean): string {

@@ -72,9 +72,9 @@ export function KSeFInboxKorPage() {
       .map((l) => {
         const newQty = parseFloat(l.newQty);
         const newCost = parseFloat(l.newCost);
-        const changed: Record<string, unknown> = { delivery_item_id: l.deliveryItemId };
-        if (!Number.isNaN(newQty) && newQty !== l.originalQty) changed.new_quantity_actual = newQty;
-        if (!Number.isNaN(newCost) && newCost !== l.originalCost) changed.new_unit_cost = newCost;
+        const changed: PzKorItemPayload = { delivery_item_id: l.deliveryItemId };
+        if (!Number.isNaN(newQty) && newQty !== l.originalQty) changed.new_quantity_actual = String(newQty);
+        if (!Number.isNaN(newCost) && newCost !== l.originalCost) changed.new_unit_cost = String(newCost);
         return changed;
       });
 
@@ -87,7 +87,7 @@ export function KSeFInboxKorPage() {
     setSubmitError(null);
     try {
       const doc = await deliveryService.createPzKor(selectedPzId, {
-        items: items as PzKorItemPayload[],
+        items,
         notes: notes || undefined,
       });
       navigate(`/delivery/${doc.id}`);

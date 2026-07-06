@@ -192,7 +192,7 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undef
 
 function App() {
   return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID ?? ''}>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID ?? ''} locale="pl">
     <BrowserRouter>
       <AuthProvider>
         <EnsureCurrentCompany />

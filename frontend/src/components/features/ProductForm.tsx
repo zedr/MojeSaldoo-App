@@ -78,15 +78,6 @@ const EMPTY_PRODUCT_DEFAULTS: ProductFormValues = {
   is_active: true,
 };
 
-const EMPTY_SERVICE_DEFAULTS: ProductFormValues = {
-  ...EMPTY_PRODUCT_DEFAULTS,
-  is_service: true,
-  unit: 'godz',
-  track_batches: false,
-  min_stock_alert: '0',
-  shelf_life_days: '',
-};
-
 const VAT_PRESETS = ['0', '5', '8', '23'] as const;
 
 function productToFormDefaults(product: Product): ProductFormValues {

@@ -6,6 +6,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { TestQueryProvider } from '@/test/TestQueryProvider';
+import type { CompanyRole, UserPermissions } from '@/types';
 import { CompanySettingsPage } from './CompanySettingsPage';
 
 function renderPage() {
@@ -25,7 +26,9 @@ const authState = vi.hoisted(() => ({
   user: {
     id: 1,
     current_company: '550e8400-e29b-41d4-a716-446655440000' as string | null,
-    current_company_role: 'admin' as 'admin' | 'manager' | 'driver' | 'viewer' | null,
+    current_company_role: 'admin' as CompanyRole | null,
+    is_company_admin: true as boolean,
+    permissions: null as UserPermissions | null,
   },
 }));
 
@@ -125,9 +128,11 @@ describe('CompanySettingsPage', () => {
       is_company_admin: true,
       permissions: {
         can_manage_team: true, can_manage_settings: true, can_see_prices: true,
-        can_manage_products: true, can_manage_customers: true, can_manage_orders: true,
+        can_manage_products: true, can_manage_warehouses: true, can_manage_inventory: true,
+        can_manage_customers: true, can_manage_orders: true,
         can_manage_delivery: true, can_access_routes: true, can_manage_invoices: true,
         can_manage_purchasing: true, can_manage_production: true, can_view_reports: true,
+        can_access_ksef_inbox: true, can_manage_stock_moves: true, can_manage_accounting: true,
       },
     };
     myCompaniesListState.data = [
@@ -178,9 +183,11 @@ describe('CompanySettingsPage', () => {
     authState.user.is_company_admin = false;
     authState.user.permissions = {
       can_manage_team: false, can_manage_settings: false, can_see_prices: true,
-      can_manage_products: true, can_manage_customers: true, can_manage_orders: true,
+      can_manage_products: true, can_manage_warehouses: false, can_manage_inventory: false,
+      can_manage_customers: true, can_manage_orders: true,
       can_manage_delivery: true, can_access_routes: false, can_manage_invoices: false,
       can_manage_purchasing: false, can_manage_production: false, can_view_reports: false,
+      can_access_ksef_inbox: false, can_manage_stock_moves: false, can_manage_accounting: false,
     };
     renderPage();
 

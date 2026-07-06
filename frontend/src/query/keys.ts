@@ -27,7 +27,7 @@ export const customerKeys = {
 export const productKeys = {
   all: ['products'] as const,
   lists: () => [...productKeys.all, 'list'] as const,
-  list: (params: { page: number; sku: string }) => [...productKeys.lists(), params] as const,
+  list: (params: { page: number; sku: string; isService?: boolean }) => [...productKeys.lists(), params] as const,
   details: () => [...productKeys.all, 'detail'] as const,
   detail: (id: string) => [...productKeys.details(), id] as const,
 };

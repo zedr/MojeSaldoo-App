@@ -40,6 +40,7 @@ const baseProduct: Product = {
   track_batches: true,
   min_stock_alert: '0',
   shelf_life_days: 30,
+  is_service: false,
   is_resalable: false,
   markup_percent: null,
   avg_cost: null,

@@ -59,7 +59,14 @@ export function useUpdateMemberMutation(companyId: string) {
       data,
     }: {
       membershipId: string;
-      data: { company_role_id?: string; is_active?: boolean };
+      data: {
+        company_role_id?: string;
+        is_active?: boolean;
+        first_name?: string;
+        last_name?: string;
+        email?: string | null;
+        password?: string;
+      };
     }) => teamService.updateMember(companyId, membershipId, data),
     onSuccess: () => void qc.invalidateQueries({ queryKey: companyKeys.members(companyId) }),
   });
