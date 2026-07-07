@@ -26,6 +26,13 @@ COPY frontend/package-lock.json /app/package-lock.json
 RUN npm ci
 
 COPY frontend/ /app/
+
+# Bake a *relative* API base URL into the bundle so the browser calls the API on
+# the same HTTPS origin (e.g. https://<host>/api), which Caddy reverse-proxies to
+# the backend (see Caddyfile: handle /api/*). Without this, the frontend's build
+# fallback would emit an absolute http://…:8000/api URL and the browser would
+# block it as mixed active content on the HTTPS page.
+ENV VITE_API_BASE_URL=/api
 RUN npm run build
 
 # ---- Fetch stage: Caddy has no UBI/RHEL package, so pull the official static

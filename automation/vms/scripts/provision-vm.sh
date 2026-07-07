@@ -22,7 +22,7 @@ usage() {
 Usage: provision-vm.sh [vm_name] [-H host] [-u ssh_user] [-k ssh_pubkey_file] [-- ansible-playbook-args...]
 
   [vm_name]           libvirt domain name to resolve via `virsh domifaddr`
-                       (default: centos-stream10, matching create-vm.yml's
+                       (default: fedora-cloud-44, matching create-vm.yml's
                        default vm_name). Ignored if -H is given.
   -H host             IP address or hostname of the VM, bypassing the
                        virsh domifaddr lookup
@@ -36,7 +36,7 @@ Examples:
   provision-vm.sh -u root
 
   # Target a specific libvirt VM by name
-  provision-vm.sh my-centos-vm -u root
+  provision-vm.sh my-fedora-vm -u root
 
   # Target a host directly, skipping the virsh lookup
   provision-vm.sh -H 192.168.122.50 -u zedr
@@ -48,7 +48,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-vm_name="centos-stream10"
+vm_name="fedora-cloud-44"
 host=""
 ssh_user="root"
 pubkey_file=""

@@ -1,5 +1,5 @@
 ---
-# Provisions a blank CentOS Stream 10 cloud VM (as created by create-vm.yml)
+# Provisions a blank Fedora Cloud VM (as created by create-vm.yml)
 # with the software and configuration needed to run the MojeSaldoo application
 # in rootless Podman containers (see compose.yml).
 #
@@ -63,6 +63,21 @@
     mojesaldoo_proxy_image: "localhost/mojesaldoo-proxy:latest"
 
   tasks:
+    # On a freshly booted cloud VM, NetworkManager/systemd-resolved may not
+    # have finished writing /etc/resolv.conf when the play first reaches the
+    # dnf task. dnf then fails to download repo metadata with an opaque
+    # "Could not resolve host mirrors.fedoraproject.org" error, even though
+    # the host-side libvirt resolver is perfectly healthy. Poll name
+    # resolution until it works so package installs ride out that settling
+    # window (and fail with a clear message if DNS never comes up).
+    - name: Wait for the guest's DNS resolver to come up
+      ansible.builtin.command: getent hosts mirrors.fedoraproject.org
+      register: mojesaldoo_dns_probe
+      until: mojesaldoo_dns_probe.rc == 0
+      retries: 20
+      delay: 3
+      changed_when: false
+
     - name: Install required packages
       ansible.builtin.dnf:
         name: "{{ provision_packages }}"

@@ -57,7 +57,23 @@
       "Bash(podman load *)",
       "Bash(ansible-playbook *)",
       "Bash(podman inspect *)",
-      "Bash(podman rm *)"
+      "Bash(podman rm *)",
+      "Bash(getent hosts *)",
+      "Bash(virsh net-list *)",
+      "Bash(sudo virsh net-list --all)",
+      "Read(//proc/sys/net/ipv4/**)",
+      "Bash(sudo virsh -c qemu:///system net-list --all)",
+      "Bash(find automation/vms -maxdepth 2 -type f)",
+      "Bash(find automation *)",
+      "Bash(ip -br addr show)",
+      "Bash(ip -br link show)",
+      "Bash(ip -o addr show)",
+      "Bash(sudo virsh -c qemu:///system list --all)",
+      "Bash(sudo virsh -c qemu:///system domifaddr centos-stream10)",
+      "Bash(sudo virsh -c qemu:///system net-info default)",
+      "Bash(dig @192.168.124.1 mirrors.fedoraproject.org +short)",
+      "Bash(sudo firewall-cmd --get-active-zones)",
+      "Bash(sudo firewall-cmd --info-zone=libvirt)"
     ]
   }
 }

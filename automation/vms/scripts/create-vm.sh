@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wrapper for playbooks/create-vm.yml: spins up a local CentOS Stream 10
+# Wrapper for playbooks/create-vm.yml: spins up a local Fedora Cloud
 # libvirt VM. See playbooks/README.md for details.
 set -euo pipefail
 
@@ -17,7 +17,7 @@ Usage: create-vm.sh <vm_name> [-c vcpus] [-m memory_mb] [-d disk_gb] [-n network
   -n network  libvirt network to attach to (default: default)
 
 Example:
-  create-vm.sh my-centos-vm
+  create-vm.sh my-fedora-vm
 EOF
 }
 
