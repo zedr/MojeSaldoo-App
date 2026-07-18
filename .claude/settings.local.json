@@ -73,7 +73,16 @@
       "Bash(sudo virsh -c qemu:///system net-info default)",
       "Bash(dig @192.168.124.1 mirrors.fedoraproject.org +short)",
       "Bash(sudo firewall-cmd --get-active-zones)",
-      "Bash(sudo firewall-cmd --info-zone=libvirt)"
+      "Bash(sudo firewall-cmd --info-zone=libvirt)",
+      "Bash(chmod +x automation/vms/scripts/provision-vm-centos.sh)",
+      "Bash(bash -n automation/vms/scripts/provision-vm-centos.sh)",
+      "Bash(chmod +x automation/vms/scripts/create-vm-centos.sh)",
+      "Bash(bash -n automation/vms/scripts/create-vm-centos.sh)",
+      "WebFetch(domain:cloud.centos.org)",
+      "Bash(./venv/bin/python manage.py showmigrations orders van_routes)",
+      "Bash(./venv/bin/python *)",
+      "Bash(DJANGO_SETTINGS_MODULE=config.settings_production PYTHONPATH=/home/zedr/src/MojeSaldoo-App/backend/apps ./venv/bin/python -m pytest apps/users/tests.py::WebPushSubscriptionAPITests::test_public_key_returns_vapid_key -q --ds=config.settings_production)",
+      "Bash(PG_DATABASE_URL=postgres://u:p@localhost/db DJANGO_SECRET_KEY=x ../venv/bin/python -c ' *)"
     ]
   }
 }

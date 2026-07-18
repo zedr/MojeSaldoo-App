@@ -6,7 +6,7 @@ SYS_PYTHON ?= "python${PYTHON_VERSION}"
 ENV_PYTHON := ${ENV}/bin/python3
 SITE_PACKAGES := ${ENV}/lib/python${PYTHON_VERSION}/site-packages
 
-default: install
+default: test
 
 ${ENV_PYTHON}:
 	@echo "Creating Python ${PYTHON_VERSION} environment..." >&2
@@ -28,6 +28,9 @@ lint: ${DEV_REQUIREMENTS}
 	@${ENV_PYTHON} -m ruff check src
 	@echo "Running ty..."
 	@${ENV_PYTHON} -m ty check src
+
+migrations: ${DEV_REQUIREMENTS}
+	@${ENV_PYTHON} python -m backend/manage.py make
 
 build:
 	@mkdir -p build/
