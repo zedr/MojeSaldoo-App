@@ -1,12 +1,20 @@
 import uuid
 
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager
 from django.db import models
+
+
+class NullableEmailUserManager(UserManager):
+    @classmethod
+    def normalize_email(cls, email):
+        return super().normalize_email(email) or None
 
 
 class User(AbstractUser):
     uuid = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     email = models.EmailField(unique=True, null=True, blank=True)
+
+    objects = NullableEmailUserManager()
     phone_number = models.CharField(max_length=20, blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

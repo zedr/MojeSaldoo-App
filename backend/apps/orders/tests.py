@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product, ProductStock, StockMovement, Warehouse
-from apps.users.models import Company, CompanyMembership
+from apps.users.models import Company, CompanyMembership, CompanyModule
 
 
 class OrderApiTests(TestCase):
@@ -31,6 +31,7 @@ class OrderApiTests(TestCase):
             role="admin",
             is_active=True,
         )
+        CompanyModule.objects.create(company=self.co, module="warehouses", is_enabled=True)
         self.user.current_company = self.co
         self.user.save(update_fields=["current_company"])
         self.customer = Customer.objects.create(name="Buyer Co", company=self.co)

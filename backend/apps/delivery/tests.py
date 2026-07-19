@@ -294,6 +294,8 @@ class DeliveryDocumentAPITests(TestCase):
         )
         self.user.current_company = self.co
         self.user.save(update_fields=["current_company"])
+        CompanyModule.objects.create(company=self.co, module="delivery", is_enabled=True)
+        CompanyModule.objects.create(company=self.co, module="warehouses", is_enabled=True)
         self.customer = Customer.objects.create(name="Buyer", company=self.co)
         self.order = Order.objects.create(
             user=self.user,
@@ -2086,6 +2088,8 @@ class VanLoadingAPITests(TestCase):
         )
         self.user.current_company = self.co
         self.user.save(update_fields=["current_company"])
+        CompanyModule.objects.create(company=self.co, module="delivery", is_enabled=True)
+        CompanyModule.objects.create(company=self.co, module="warehouses", is_enabled=True)
         self.wh_main = Warehouse.objects.create(
             user=self.user,
             company=self.co,
@@ -2381,6 +2385,8 @@ class VanReconciliationAPITests(TestCase):
         )
         self.user.current_company = self.co
         self.user.save(update_fields=["current_company"])
+        CompanyModule.objects.create(company=self.co, module="delivery", is_enabled=True)
+        CompanyModule.objects.create(company=self.co, module="warehouses", is_enabled=True)
         self.wh_main = Warehouse.objects.create(
             user=self.user,
             company=self.co,
@@ -3119,6 +3125,8 @@ class GenerateForOrderVanRouteAutoTests(TestCase):
         CompanyMembership.objects.create(user=self.user, company=self.co, role="admin", is_active=True)
         self.user.current_company = self.co
         self.user.save(update_fields=["current_company"])
+        CompanyModule.objects.create(company=self.co, module="delivery", is_enabled=True)
+        CompanyModule.objects.create(company=self.co, module="warehouses", is_enabled=True)
         self.customer = Customer.objects.create(name="CA", company=self.co)
         self.product = Product.objects.create(
             name="PA",
@@ -3218,6 +3226,8 @@ class FifoStockBatchDeductionOnWZTests(TestCase):
         )
         self.user.current_company = self.co
         self.user.save(update_fields=["current_company"])
+        CompanyModule.objects.create(company=self.co, module="delivery", is_enabled=True)
+        CompanyModule.objects.create(company=self.co, module="warehouses", is_enabled=True)
 
         self.wh = Warehouse.objects.create(
             user=self.user,
@@ -3391,6 +3401,8 @@ class ExpiryDateOnPZTests(TestCase):
         )
         self.user.current_company = self.co
         self.user.save(update_fields=["current_company"])
+        CompanyModule.objects.create(company=self.co, module="delivery", is_enabled=True)
+        CompanyModule.objects.create(company=self.co, module="warehouses", is_enabled=True)
 
         self.wh = Warehouse.objects.create(
             user=self.user,
@@ -3936,6 +3948,8 @@ class WzKorAPITests(TestCase):
         )
         self.user.current_company = self.company
         self.user.save()
+        CompanyModule.objects.create(company=self.company, module="delivery", is_enabled=True)
+        CompanyModule.objects.create(company=self.company, module="warehouses", is_enabled=True)
         self.warehouse = Warehouse.objects.create(
             company=self.company, user=self.user, name="MG", code="MG", warehouse_type="main"
         )

@@ -2,6 +2,8 @@
 #   podman compose up --build -d
 #   podman compose logs -f backend
 #
+# Podman file for development purposes ONLY.
+#
 # The backend image is defined by automation/containers/backend/Containerfile and
 # runs gunicorn after applying migrations (see entrypoint.sh). It connects to the
 # `db` service via PG_DATABASE_URL; uploaded media and logs are persisted onto the
@@ -42,8 +44,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # Override these for any real deployment — the defaults are dev-only.
-      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY}"
+      # NOTE: this default secret key is hardcoded for local dev convenience only.
+      # It is NOT secret (it's committed to the repo) — override DJANGO_SECRET_KEY
+      # with a real value for any non-local deployment.
+      DJANGO_SECRET_KEY: "${DJANGO_SECRET_KEY:-N1WOPeKpd2xG9UL9sTa2ChWULQVGjW01eHgdH3O0bU82ghCfiem1bs0_OI_xC8cs2go}"
       DJANGO_SETTINGS_MODULE: "config.settings_production"
       DJANGO_ALLOWED_HOSTS: "${DJANGO_ALLOWED_HOSTS:-*}"
       DJANGO_DEBUG: "${DJANGO_DEBUG:-False}"
@@ -55,7 +59,9 @@ services:
       # container's appuser (uid 1001) so it can write. Both are podman options.
       - ./data/media:/app/media:Z,U
       - ./data/logs:/app/logs:Z,U
-    restart: unless-stopped
+    # No restart policy: with one, podman's own restart manager races the
+    # `podman compose down` teardown and can leave the container behind
+    # instead of being removed.
     healthcheck:
       # Hits the unauthenticated /healthz/ endpoint (config/urls.py).
       test: ["CMD", "python3.12", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=2).status==200 else 1)"]
@@ -77,7 +83,9 @@ services:
     environment:
       # Vite dev-server proxy forwards /api to the backend service (see vite.config.ts).
       VITE_PROXY_TARGET: "http://backend:8000"
-    restart: unless-stopped
+    # No restart policy: with one, podman's own restart manager races the
+    # `podman compose down` teardown and can leave the container behind
+    # instead of being removed.
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
@@ -96,8 +104,6 @@ services:
     build:
       context: .
       dockerfile: automation/containers/backend/Containerfile
-      secrets:
-        - github_token
     image: mojesaldoo-backend:latest
     depends_on:
       db:
@@ -111,16 +117,6 @@ services:
     # --ds wins over the pytest ini's config.settings (SQLite), so the suite runs
     # against Postgres. Extra args here are forwarded to pytest by entrypoint.sh.
     command: ["--test", "--ds=config.settings_production"]
-
-secrets:
-  # The backend Containerfile clones its source straight from GitHub (see
-  # automation/containers/backend/Containerfile) instead of using this build
-  # context, so it needs a token to authenticate the clone. Export
-  # GITHUB_API_TOKEN in your shell (or a .env file in the repo root) before
-  # running `podman compose build`/`up --build` — the value is never written
-  # to an image layer.
-  github_token:
-    environment: GITHUB_API_TOKEN
 
 volumes:
   pgdata:
