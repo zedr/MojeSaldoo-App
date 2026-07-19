@@ -1,11 +1,13 @@
 ---
-# Spins up a local Fedora Cloud VM on libvirt (qemu:///system) using
-# virt-install --import against the official Fedora Cloud Base Generic
-# image. No provisioning is done — the VM is created and started as-is.
+# Spins up a local CentOS Stream 10 GenericCloud VM on libvirt
+# (qemu:///system) using virt-install --import against the official CentOS
+# Stream cloud image. No provisioning is done — the VM is created and started
+# as-is. This is the CentOS Stream 10 counterpart of create-vm.yml (which
+# targets Fedora Cloud); keep the two in sync.
 #
 # Usage:
-#   ansible-playbook automation/vms/playbooks/create-vm.yml \
-#     -e vm_name=my-fedora-vm \
+#   ansible-playbook automation/vms/playbooks/create-vm-centos.yml \
+#     -e vm_name=my-centos-vm \
 #     -e libvirt_pool_dir=~/libvirt
 #
 # Requires: dnf, qemu-kvm, libvirt, virt-install, and a running libvirtd —
@@ -19,19 +21,18 @@
 # disk at vm_disk_path must be owned by qemu:qemu (see playbooks/README.md
 # for the one-time chown step).
 #
-# fedora_release/fedora_release_respin pin an exact Fedora Cloud build (there
-# is no stable "-latest" filename like CentOS publishes); bump them by hand
-# when a new Fedora release/respin comes out — see
-# https://fedoraproject.org/cloud/download for current values.
+# centos_image_build pins an exact CentOS Stream GenericCloud build; bump it
+# by hand when a new respin comes out — see
+# https://cloud.centos.org/centos/10-stream/x86_64/images/ for current values.
 
-- name: Create a local Fedora Cloud libvirt VM
+- name: Create a local CentOS Stream 10 GenericCloud libvirt VM
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
 
   vars:
-    vm_name: "fedora-cloud-44"
+    vm_name: "centos-stream-10"
     vm_vcpus: 2
     vm_memory_mb: 4096
     vm_disk_gb: 20
@@ -40,14 +41,15 @@
     libvirt_pool_name: "mojesaldoo-vms"
     libvirt_pool_dir: "{{ lookup('env', 'HOME') }}/libvirt"
 
-    fedora_release: "44"
-    fedora_release_respin: "1.7"
-    fedora_image_filename: "Fedora-Cloud-Base-Generic-{{ fedora_release }}-{{ fedora_release_respin }}.x86_64.qcow2"
-    fedora_image_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/{{ fedora_release }}/Cloud/x86_64/images/{{ fedora_image_filename }}"
-    fedora_checksum_url: "https://download.fedoraproject.org/pub/fedora/linux/releases/{{ fedora_release }}/Cloud/x86_64/images/Fedora-Cloud-{{ fedora_release }}-{{ fedora_release_respin }}-x86_64-CHECKSUM"
+    centos_stream_release: "10"
+    centos_image_build: "20250728.1"
+    centos_image_filename: "CentOS-Stream-GenericCloud-{{ centos_stream_release }}-{{ centos_image_build }}.x86_64.qcow2"
+    centos_images_base_url: "https://cloud.centos.org/centos/{{ centos_stream_release }}-stream/x86_64/images"
+    centos_image_url: "{{ centos_images_base_url }}/{{ centos_image_filename }}"
+    centos_checksum_url: "{{ centos_images_base_url }}/{{ centos_image_filename }}.SHA256SUM"
 
     cached_images_dir: "{{ libvirt_pool_dir }}/.cached-images"
-    base_image_path: "{{ cached_images_dir }}/{{ fedora_image_filename }}"
+    base_image_path: "{{ cached_images_dir }}/{{ centos_image_filename }}"
     vm_disk_path: "{{ libvirt_pool_dir }}/{{ vm_name }}.qcow2"
 
   tasks:
@@ -90,27 +92,29 @@
         path: "{{ base_image_path }}"
       register: cached_image_stat
 
-    - name: Fetch the published CHECKSUM file for the cloud image
+    - name: Fetch the published SHA256SUM file for the cloud image
       when: not cached_image_stat.stat.exists
       ansible.builtin.uri:
-        url: "{{ fedora_checksum_url }}"
+        url: "{{ centos_checksum_url }}"
         return_content: true
-      register: fedora_checksum_raw
+      register: centos_checksum_raw
 
+    # CentOS publishes a per-image BSD-style SHA256SUM sidecar
+    # ("SHA256 (<filename>) = <hash>"), the same format Fedora uses.
     - name: Extract the SHA256 checksum for the image file
       when: not cached_image_stat.stat.exists
       ansible.builtin.set_fact:
-        fedora_image_sha256: >-
-          {{ fedora_checksum_raw.content
-             | regex_search('SHA256 \(' ~ fedora_image_filename ~ '\) = ([0-9a-f]{64})', '\1')
+        centos_image_sha256: >-
+          {{ centos_checksum_raw.content
+             | regex_search('SHA256 \(' ~ centos_image_filename ~ '\) = ([0-9a-f]{64})', '\1')
              | first }}
 
-    - name: Download the Fedora Cloud Base Generic image (checksum-verified)
+    - name: Download the CentOS Stream GenericCloud image (checksum-verified)
       when: not cached_image_stat.stat.exists
       ansible.builtin.get_url:
-        url: "{{ fedora_image_url }}"
+        url: "{{ centos_image_url }}"
         dest: "{{ base_image_path }}"
-        checksum: "sha256:{{ fedora_image_sha256 }}"
+        checksum: "sha256:{{ centos_image_sha256 }}"
         mode: "0644"
         timeout: 600
 

@@ -1,7 +1,15 @@
 ---
-# Provisions a blank Fedora Cloud VM (as created by create-vm.yml)
-# with the software and configuration needed to run the MojeSaldoo application
-# in rootless Podman containers (see compose.yml).
+# Provisions a blank CentOS Stream 10 GenericCloud VM (booted from
+# CentOS-Stream-GenericCloud-10-20250728.1.x86_64.qcow2) with the software and
+# configuration needed to run the MojeSaldoo application in rootless Podman
+# containers (see compose.yml).
+#
+# This is the CentOS Stream 10 counterpart of provision-vm.yml (which targets
+# Fedora Cloud). The two are intentionally kept in lockstep — the only
+# OS-specific differences are this header, the DNS-probe host below, and the
+# fact that CentOS Stream serves packages from the CentOS mirrors rather than
+# Fedora's. Everything else (users, secrets, certs, Quadlets, image transfer)
+# is identical, so keep changes in sync across both files.
 #
 # Bootstrap: the cloud image ships with no user, password, or SSH key, so
 # Ansible cannot reach it over SSH out of the box. Seeding root's SSH access
@@ -66,12 +74,12 @@
     # On a freshly booted cloud VM, NetworkManager/systemd-resolved may not
     # have finished writing /etc/resolv.conf when the play first reaches the
     # dnf task. dnf then fails to download repo metadata with an opaque
-    # "Could not resolve host mirrors.fedoraproject.org" error, even though
+    # "Could not resolve host mirror.stream.centos.org" error, even though
     # the host-side libvirt resolver is perfectly healthy. Poll name
     # resolution until it works so package installs ride out that settling
     # window (and fail with a clear message if DNS never comes up).
     - name: Wait for the guest's DNS resolver to come up
-      ansible.builtin.command: getent hosts mirrors.fedoraproject.org
+      ansible.builtin.command: getent hosts mirror.stream.centos.org
       register: mojesaldoo_dns_probe
       until: mojesaldoo_dns_probe.rc == 0
       retries: 20

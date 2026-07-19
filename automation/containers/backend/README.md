@@ -2,22 +2,38 @@
 
 ## Build
 
-Run from the **repo root**:
+### Build from Github
+
+Use Containerfile.github — it clones the
+`main` branch straight from GitHub at build time, so the build context can be
+any directory containing the Containerfile. A GitHub API token must be
+supplied as a **BuildKit secret** (never a plain `--build-arg`, which would
+leak into the image history) via the `GITHUB_API_TOKEN` environment variable:
 
 ```bash
-podman build \
+GITHUB_API_TOKEN=ghp_xxx podman build \
+  --secret id=github_token,env=GITHUB_API_TOKEN \
   -f automation/containers/backend/Containerfile \
   -t mojesaldoo-backend:latest \
   .
 ```
 
+> Requires a token with read access to
+> `https://github.com/netka99/MojeSaldoo-App.git`. Podman/Buildah and Docker
+> BuildKit both support `--secret`; the file's `RUN --mount=type=secret` reads
+> it only for the duration of the clone step.
+
 ## Run with Compose (recommended)
 
 A `compose.yml` at the **repo root** brings up the backend together with a
-**PostgreSQL 16** database, with persistence and healthchecks already wired. From
+**PostgreSQL 16** database, with persistence and healthchecks already wired.
+Since the backend's build clones its source from GitHub (see above), export
+`GITHUB_API_TOKEN` before building — compose wires it to the `github_token`
+build secret automatically (see the `secrets:` block in `compose.yml`). From
 the repo root:
 
 ```bash
+export GITHUB_API_TOKEN=ghp_xxx
 podman compose up --build -d   # build the image and start in the background
 podman compose logs -f backend # follow logs
 podman compose down            # stop and remove the containers

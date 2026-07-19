@@ -32,6 +32,8 @@ services:
     build:
       context: .
       dockerfile: automation/containers/backend/Containerfile
+      secrets:
+        - github_token
     image: mojesaldoo-backend:latest
     container_name: mojesaldoo-backend
     depends_on:
@@ -94,6 +96,8 @@ services:
     build:
       context: .
       dockerfile: automation/containers/backend/Containerfile
+      secrets:
+        - github_token
     image: mojesaldoo-backend:latest
     depends_on:
       db:
@@ -107,6 +111,16 @@ services:
     # --ds wins over the pytest ini's config.settings (SQLite), so the suite runs
     # against Postgres. Extra args here are forwarded to pytest by entrypoint.sh.
     command: ["--test", "--ds=config.settings_production"]
+
+secrets:
+  # The backend Containerfile clones its source straight from GitHub (see
+  # automation/containers/backend/Containerfile) instead of using this build
+  # context, so it needs a token to authenticate the clone. Export
+  # GITHUB_API_TOKEN in your shell (or a .env file in the repo root) before
+  # running `podman compose build`/`up --build` — the value is never written
+  # to an image layer.
+  github_token:
+    environment: GITHUB_API_TOKEN
 
 volumes:
   pgdata:

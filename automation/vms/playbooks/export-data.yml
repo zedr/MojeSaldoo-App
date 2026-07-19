@@ -1,0 +1,77 @@
+---
+# Runs Django's manage.py dumpdata inside the mojesaldoo-backend Quadlet
+# container on the VM, and fetches the resulting JSON dump back to the
+# control host at $PWD/exports/<current-datetime-isoformat>-data.json.
+#
+# The backend container runs under rootless Podman as app_user (see
+# provision-vm.yml), so podman exec needs XDG_RUNTIME_DIR/
+# DBUS_SESSION_BUS_ADDRESS set — this playbook resolves those the same way
+# provision-vm.yml does.
+#
+# Usage:
+#   ansible-playbook automation/vms/playbooks/export-data.yml
+
+- name: Export a dumpdata snapshot from the MojeSaldoo VM
+  hosts: mojesaldoo_vms
+  gather_facts: false
+
+  vars:
+    app_user: "zedr"
+    mojesaldoo_backend_container: "mojesaldoo-backend"
+
+    export_dir: "{{ lookup('env', 'PWD') }}/exports"
+    export_filename: "{{ export_timestamp }}-data.json"
+    export_local_path: "{{ export_dir }}/{{ export_filename }}"
+    export_remote_path: "/tmp/mojesaldoo-dumpdata-{{ export_timestamp }}.json"
+
+  tasks:
+    # now() is a live function, not a constant — computed via set_fact here
+    # so every later reference to export_timestamp resolves to the same
+    # value instead of re-evaluating (and drifting) on each use.
+    - name: Compute the export timestamp
+      ansible.builtin.set_fact:
+        export_timestamp: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%S') }}"
+
+    - name: Determine the app user's UID (for rootless Podman exec)
+      ansible.builtin.command: "id -u {{ app_user }}"
+      register: mojesaldoo_uid_result
+      changed_when: false
+
+    - name: Set facts derived from the app user's UID
+      ansible.builtin.set_fact:
+        mojesaldoo_user_env:
+          XDG_RUNTIME_DIR: "/run/user/{{ mojesaldoo_uid_result.stdout }}"
+          DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ mojesaldoo_uid_result.stdout }}/bus"
+
+    - name: Ensure the local exports directory exists
+      ansible.builtin.file:
+        path: "{{ export_dir }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      run_once: true
+
+    - name: Run manage.py dumpdata inside the backend container
+      ansible.builtin.shell: >
+        podman exec {{ mojesaldoo_backend_container }} python3.12 manage.py dumpdata
+        > {{ export_remote_path }}
+      become: true
+      become_user: "{{ app_user }}"
+      environment: "{{ mojesaldoo_user_env }}"
+      changed_when: true
+
+    - name: Fetch the dump to the control host
+      ansible.builtin.fetch:
+        src: "{{ export_remote_path }}"
+        dest: "{{ export_local_path }}"
+        flat: true
+
+    - name: Remove the remote temp dump file
+      ansible.builtin.file:
+        path: "{{ export_remote_path }}"
+        state: absent
+
+    - name: Report where the export landed
+      ansible.builtin.debug:
+        msg: "Data exported to {{ export_local_path }}"

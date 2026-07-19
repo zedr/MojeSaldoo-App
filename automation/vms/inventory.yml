@@ -1,0 +1,4 @@
+mojesaldoo_vms:
+  hosts:
+    www.mojesaldoo.com:
+      ansible_user: zedr

@@ -1,0 +1,82 @@
+FROM quay.io/centos/centos:stream10
+
+LABEL org.opencontainers.image.title="MojeSaldoo Backend" \
+      org.opencontainers.image.description="Django 4.2 API — gunicorn on CentOS Stream 10"
+
+# CentOS Stream 10 AppStream provides tesseract/leptonica (EPEL dropped tesseract),
+# and the platform python (package `python3`) is 3.12 from BaseOS, exposed as the
+# `python3.12` binary — so no extra repos are needed. `git` is needed below to
+# pull the application source directly from GitHub.
+RUN dnf install -y \
+        git \
+        python3 \
+        python3-pip \
+        tesseract \
+        tesseract-langpack-pol \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+RUN useradd --uid 1001 --no-create-home --shell /sbin/nologin appuser \
+    && mkdir -p /app/media /app/staticfiles /app/logs \
+    && chown -R appuser:appuser /app
+
+WORKDIR /app
+
+# The application source is not taken from the local build context — it's
+# cloned fresh from the `main` branch of the upstream repo so the image always
+# reflects the latest merged code. GITHUB_API_TOKEN authenticates the clone
+# (the repo may be private); it's read from the environment at build time and
+# never baked into an image layer.
+ENV GITHUB_REPO_URL=https://github.com/netka99/MojeSaldoo-App.git
+
+# Dependencies are declared in pyproject.toml. `pip install .` builds from the
+# project source (setuptools), so the packages it bundles (config, apps) must be
+# present before installing — that ties the dependency layer to the source and
+# limits cache reuse, which is an acceptable trade-off for a single-stage build.
+# The `postgres` extra pulls in psycopg2-binary for the production database; the
+# `dev` extra pulls in pytest so the entrypoint's `--test` mode can run the suite.
+RUN --mount=type=secret,id=github_token,env=GITHUB_API_TOKEN \
+    git clone --depth 1 --branch main \
+        "https://${GITHUB_API_TOKEN}@${GITHUB_REPO_URL#https://}" /tmp/src \
+    && cp /tmp/src/backend/pyproject.toml /app/pyproject.toml \
+    && cp -r /tmp/src/backend/config /app/config \
+    && cp -r /tmp/src/backend/apps /app/apps \
+    && cp /tmp/src/backend/manage.py /app/manage.py \
+    && cp /tmp/src/automation/containers/backend/entrypoint.sh /app/entrypoint.sh \
+    && rm -rf /tmp/src \
+    && chmod +x /app/entrypoint.sh \
+    && python3.12 -m pip install --upgrade pip --no-cache-dir \
+    && python3.12 -m pip install --no-cache-dir '.[postgres,dev]'
+
+ENV DJANGO_SETTINGS_MODULE=config.settings \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DJANGO_DEBUG=False \
+    PYTHONPATH=/app/apps/
+
+# collectstatic doesn't touch the DB; runs with the build-time settings above.
+RUN python3.12 manage.py collectstatic --noinput \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8000
+
+# SECRET_KEY and ALLOWED_HOSTS must be supplied at runtime, e.g.:
+#   -e DJANGO_SECRET_KEY=... -e DJANGO_ALLOWED_HOSTS=api.example.com
+#
+# Volumes are not declared here; specify bind mounts at `podman run` time:
+#   -v /host/db.sqlite3:/app/db.sqlite3:Z
+#   -v /host/media:/app/media:Z
+# This avoids anonymous volume accumulation and keeps staticfiles/ visible.
+
+# Liveness probe — hits the unauthenticated /healthz/ endpoint.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+    CMD python3.12 -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=2).status==200 else 1)"
+
+# migrate runs at startup via the entrypoint, then gunicorn execs as PID 1.
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["python3.12", "-m", "gunicorn", \
+     "--workers", "4", \
+     "--bind", "0.0.0.0:8000", \
+     "config.wsgi:application"]

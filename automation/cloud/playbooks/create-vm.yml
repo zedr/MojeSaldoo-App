@@ -1,0 +1,77 @@
+---
+- hosts: localhost
+  vars:
+    hetzner_api_token:
+    cloud_hostname: web-1
+    ssh_port: 22
+  tasks:
+    - name: "Gather existing SSH keys"
+      hcloud_ssh_key_info:
+        api_token: "{{ hetzner_api_token }}"
+        name: zedr-ssh
+      register: existing_ssh_key
+
+    - name: "Create SSH public key for controller"
+      hcloud_ssh_key:
+        state: present
+        api_token: "{{ hetzner_api_token }}"
+        name: zedr-ssh
+        public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIQbFcdiPC3T58Fph5QQFDbVAF99w/dFq+9h5+lRC4vu zedr@zedr.com"
+        labels:
+          owner: zedr
+          location: leesti
+      when: existing_ssh_key.hcloud_ssh_key_info | length == 0
+
+    - name: "Gather existing servers"
+      hcloud_server_info:
+        api_token: "{{ hetzner_api_token }}"
+        name: "{{ cloud_hostname }}"
+      register: existing_server
+
+    - name: "Create the main server"
+      hcloud_server:
+        api_token: "{{ hetzner_api_token }}"
+        name: "{{ cloud_hostname }}"
+        server_type: cpx12
+        image: centos-stream-10
+        location: nbg1 # fsn1 or nbg1
+        labels:
+          owner: zedr
+          role: web
+          app: web
+        ssh_keys:
+          - zedr-ssh
+        state: present
+      register: created_server
+      when: existing_server.hcloud_server_info | length == 0
+
+    - name: "Determine the server facts"
+      set_fact:
+        server: "{{ created_server.hcloud_server if created_server.changed else existing_server.hcloud_server_info[0] }}"
+
+    - name: Print the gathered infos
+      debug:
+        var: server
+
+    - wait_for:
+        host: "{{ server['ipv4_address'] }}"
+        delay: 1
+        timeout: 120
+        port: "{{ ssh_port }}"
+
+    - add_host:
+        name: "{{ server['ipv4_address'] }}"
+        ansible_user: root
+        ansible_ssh_port: "{{ ssh_port }}"
+        # Bootstrap with the control host's key (the one registered as the
+        # Hetzner zedr-ssh key that gets injected into root's authorized_keys).
+        ansible_ssh_private_key_file: "~/.ssh/id_ed25519"
+        # The VM is freshly created, so its host key is not yet in known_hosts.
+        # Skip strict checking so the first non-interactive connection doesn't
+        # stall on ssh-askpass / host key verification. IdentitiesOnly ensures
+        # only the key above is offered (root only accepts that one).
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
+        groups:
+          - mojesaldoo_vms
+
+- import_playbook: ../../vms/playbooks/provision-vm-centos.yml

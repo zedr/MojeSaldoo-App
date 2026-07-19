@@ -166,3 +166,58 @@ Variables (override with `-e`, or via the script's `-k`):
 | --- | --- | --- |
 | `app_user` | `zedr` | user created on the VM |
 | `zedr_ssh_pubkey_file` | `~/.ssh/id_ed25519.pub` | public key (on the control host) installed into `zedr`'s `authorized_keys`; the script also injects this key for root when seeding |
+
+## `export-data.yml`
+
+### Summary
+
+Runs `manage.py dumpdata` inside the running `mojesaldoo-backend` container
+and fetches the resulting JSON dump back to the control host, at
+`$PWD/exports/<current-datetime-isoformat>-data.json`.
+
+### Run
+
+```bash
+ansible-playbook automation/vms/playbooks/export-data.yml \
+  -i "<host>," -e ansible_user=zedr
+```
+
+Variables (override with `-e`):
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `app_user` | `zedr` | rootless Podman user the container runs under |
+| `mojesaldoo_backend_container` | `mojesaldoo-backend` | matches `ContainerName=` in `templates/mojesaldoo-backend.container.j2` |
+
+## `import-data.yml`
+
+### Summary
+
+Runs `manage.py loaddata` inside the running `mojesaldoo-backend` container
+to load a local JSON fixture (e.g. one produced by `export-data.yml`) into
+the VM's database.
+
+The backend container only bind-mounts `media/` and `logs/` (see
+`templates/mojesaldoo-backend.container.j2`) — `/tmp` isn't shared with the
+host — so the fixture is copied to a temp path on the VM host first, then
+`podman cp` moves it into the container for `loaddata` to read. Both temp
+copies (container-internal and VM host) are removed afterward, even if
+`loaddata` fails.
+
+### Run
+
+```bash
+ansible-playbook automation/vms/playbooks/import-data.yml \
+  -i "<host>," -e ansible_user=zedr -e datafile=./exports/mydata.json
+```
+
+`datafile` is required — the playbook fails fast with a clear message if it's
+missing, or if the given path doesn't exist on the control host.
+
+Variables (override with `-e`):
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `datafile` | *(required)* | path on the control host to the JSON fixture to import |
+| `app_user` | `zedr` | rootless Podman user the container runs under |
+| `mojesaldoo_backend_container` | `mojesaldoo-backend` | matches `ContainerName=` in `templates/mojesaldoo-backend.container.j2` |

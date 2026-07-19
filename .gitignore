@@ -1,6 +1,9 @@
 .DS_Store
 Thumbs.db
 
+# Secrets
+.secrets
+
 # Python
 .venv
 
@@ -39,3 +42,6 @@ yarn-error.log*
 
 # Compose runtime data (SQLite db, media, logs) — see compose.yml
 /data/
+
+# Exports
+exports/
